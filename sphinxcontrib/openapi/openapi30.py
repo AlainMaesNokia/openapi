@@ -244,6 +244,74 @@ def _example(media_type_objects, method=None, endpoint=None, status=None,
                 yield ''
 
 
+def convert_json_schema(schema, directive=':<json'):
+    """
+    Convert json schema to `:<json` sphinx httpdomain.
+    """
+
+    output = []
+
+    def _convert(schema, name='', required=False):
+        """
+        Fill the output list, with 2-tuple (name, template)
+        i.e: ('user.age', 'str user.age: the age of user')
+        This allow to sort output by field name
+        """
+
+        type_ = schema.get('type', 'any')
+        required_properties = schema.get('required', ())
+        if type_ == 'object' and schema.get('properties'):
+            for prop, next_schema in schema.get('properties', {}).items():
+                _convert(
+                    next_schema, '{name}.{prop}'.format(**locals()),
+                    (prop in required_properties))
+
+        elif type_ == 'array':
+            _convert(schema['items'], name + '[]')
+
+        else:
+            if name:
+                name = name.lstrip('.')
+                constraints = []
+                if required:
+                    constraints.append('required')
+                if schema.get('readOnly', False):
+                    constraints.append('read only')
+                if constraints:
+                    constraints = '({})'.format(', '.join(constraints))
+                else:
+                    constraints = ''
+
+                if schema.get('description', ''):
+                    if constraints:
+                        output.append((
+                            name,
+                            '{type_} {name}:'
+                            ' {schema[description]}'
+                            ' {constraints}'.format(**locals())))
+                    else:
+                        output.append((
+                            name,
+                            '{type_} {name}:'
+                            ' {schema[description]}'.format(**locals())))
+
+                else:
+                    if constraints:
+                        output.append(
+                            (name,
+                             '{type_} {name}:'
+                             ' {constraints}'.format(**locals())))
+                    else:
+                        output.append(
+                            (name,
+                             '{type_} {name}:'.format(**locals())))
+
+    _convert(schema)
+
+    for _, render in sorted(output):
+        yield '{} {}'.format(directive, render)
+
+
 def _httpresource(endpoint, method, properties, convert, render_examples,
                   render_request):
     # https://github.com/OAI/OpenAPI-Specification/blob/3.0.2/versions/3.0.0.md#operation-object
@@ -300,7 +368,11 @@ def _httpresource(endpoint, method, properties, convert, render_examples,
         request_content = properties.get('requestBody', {}).get('content', {})
         if request_content and 'application/json' in request_content:
             schema = request_content['application/json']['schema']
-            req_properties = json.dumps(schema['properties'], indent=2,
+            yield ''
+            for line in convert_json_schema(schema):
+                yield '{indent}{line}'.format(**locals())
+            yield ''
+            req_properties = json.dumps(schema.get('properties', {}), indent=2,
                                         separators=(',', ':'))
             yield '{indent}**Request body:**'.format(**locals())
             yield ''
